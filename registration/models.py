@@ -23,7 +23,7 @@ SHA1_RE = re.compile('^[a-f0-9]{40}$')
 
 
 def send_email(addresses_to, ctx_dict, subject_template, body_template,
-               body_html_template):
+               body_html_template, from_email=None):
     """
     Function that sends an email
     """
@@ -34,8 +34,10 @@ def send_email(addresses_to, ctx_dict, subject_template, body_template,
     )
     # Email subject *must not* contain newlines
     subject = ''.join(subject.splitlines())
-    from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
-                         settings.DEFAULT_FROM_EMAIL)
+
+    if from_email is None:
+        from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
+                             settings.DEFAULT_FROM_EMAIL)
     message_txt = render_to_string(body_template,
                                    ctx_dict)
 
