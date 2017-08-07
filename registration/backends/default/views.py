@@ -86,6 +86,7 @@ class RegistrationView(BaseRegistrationView):
 
         """
         site = get_current_site(self.request)
+        from_email = self.get_from_email()
 
         if hasattr(form, 'save'):
             new_user_instance = form.save()
@@ -98,11 +99,21 @@ class RegistrationView(BaseRegistrationView):
             site=site,
             send_email=self.SEND_ACTIVATION_EMAIL,
             request=self.request,
+            from_email=from_email,
         )
         signals.user_registered.send(sender=self.__class__,
                                      user=new_user,
                                      request=self.request)
         return new_user
+
+    def get_from_email(self):
+        """
+        Returns a properly formed email address to use as the from field.
+
+        If None, `send_email` defaults to the `REGISTRATION_DEFAULT_FROM_EMAIL`
+        or `DEFAULT_FROM_EMAIL` settings, in that order.
+        """
+        return None
 
     def registration_allowed(self):
         """
