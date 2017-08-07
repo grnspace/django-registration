@@ -5,6 +5,10 @@ django-registration-redux changelog
 Version 1.8, TBD
 ----------------
 
+Version 1.7.1, 8 August, 2017 (Greenspace-fork)
+----------------
+* Feature: Allow send_email to accept a from_email address.
+
 Version 1.7, 18 July, 2017
 ----------------
 * Fix security issue of leaking password reset token through the Referer
