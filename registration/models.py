@@ -46,7 +46,7 @@ def send_email(addresses_to, ctx_dict, subject_template, body_template,
 
     email_message = EmailMultiAlternatives(subject, message_txt,
                                            from_email, addresses_to,
-                                           headers={'Reply_to': reply_to})
+                                           headers={'Reply-To': reply_to})
 
     if getattr(settings, 'REGISTRATION_EMAIL_HTML', True):
         try:
