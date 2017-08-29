@@ -87,6 +87,7 @@ class RegistrationView(BaseRegistrationView):
         """
         site = get_current_site(self.request)
         from_email = self.get_from_email()
+        reply_to = self.get_reply_to()
 
         if hasattr(form, 'save'):
             new_user_instance = form.save()
@@ -100,6 +101,7 @@ class RegistrationView(BaseRegistrationView):
             send_email=self.SEND_ACTIVATION_EMAIL,
             request=self.request,
             from_email=from_email,
+            reply_to=reply_to,
         )
         signals.user_registered.send(sender=self.__class__,
                                      user=new_user,
@@ -112,6 +114,14 @@ class RegistrationView(BaseRegistrationView):
 
         If None, `send_email` defaults to the `REGISTRATION_DEFAULT_FROM_EMAIL`
         or `DEFAULT_FROM_EMAIL` settings, in that order.
+        """
+        return None
+
+    def get_reply_to(self):
+        """
+        Returns a properly formed email address to use as the Reply-To header.
+
+        If None, `send_email` defaults to the same value as from_email
         """
         return None
 

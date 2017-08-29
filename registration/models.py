@@ -136,7 +136,7 @@ class RegistrationManager(models.Manager):
 
     def create_inactive_user(self, site, new_user=None, send_email=True,
                              request=None, profile_info={},
-                             from_email=None, **user_info):
+                             from_email=None, reply_to=None, **user_info):
         """
         Create a new, inactive ``User``, generate a
         ``RegistrationProfile`` and email its activation key to the
@@ -168,6 +168,7 @@ class RegistrationManager(models.Manager):
                 site,
                 request,
                 from_email=from_email,
+                reply_to=reply_to,
             )
 
         return new_user
@@ -190,7 +191,14 @@ class RegistrationManager(models.Manager):
 
         return profile
 
-    def resend_activation_mail(self, email, site, request=None):
+    def resend_activation_mail(
+        self,
+        email,
+        site,
+        request=None,
+        from_email=None,
+        reply_to=None,
+    ):
         """
         Resets activation key for the user and resends activation email.
         """
@@ -204,7 +212,12 @@ class RegistrationManager(models.Manager):
             return False
 
         profile.create_new_activation_key()
-        profile.send_activation_email(site, request, from_email=from_email)
+        profile.send_activation_email(
+            site,
+            request,
+            from_email=from_email,
+            reply_to=reply_to,
+        )
 
         return True
 
@@ -332,7 +345,13 @@ class RegistrationProfile(models.Model):
                 (self.user.date_joined + expiration_date <= datetime_now()))
     activation_key_expired.boolean = True
 
-    def send_activation_email(self, site, request=None, from_email=None):
+    def send_activation_email(
+        self,
+        site,
+        request=None,
+        from_email=None,
+        reply_to=None,
+    ):
         """
         Send an activation email to the user associated with this
         ``RegistrationProfile``.
@@ -385,6 +404,10 @@ class RegistrationProfile(models.Model):
         ``from_email``
             Optional properly formed email address to use as the
             from field.
+
+        ``reply_to``
+            Optional properly formed email address to use as the
+            Reply-To header.
         """
         activation_email_subject = getattr(settings, 'ACTIVATION_EMAIL_SUBJECT',
                                            'registration/activation_email_subject.txt')
@@ -407,11 +430,16 @@ class RegistrationProfile(models.Model):
         if from_email is None:
             from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
                                  settings.DEFAULT_FROM_EMAIL)
+
+        if reply_to is None:
+            reply_to = from_email
+
         message_txt = render_to_string(activation_email_body,
                                        ctx_dict, request=request)
 
         email_message = EmailMultiAlternatives(subject, message_txt,
-                                               from_email, [self.user.email])
+                                               from_email, [self.user.email],
+                                               headers={'Reply-To': reply_to})
         if getattr(settings, 'REGISTRATION_EMAIL_HTML', True):
             try:
                 message_html = render_to_string(
