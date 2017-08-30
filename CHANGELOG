@@ -9,6 +9,8 @@ Version 1.7.2, 29 August, 2017 (Greenspace-fork)
 ----------------
 * Feature: Allow send_email to accept a reply_to address.
 * Feature: Allow send_activation_email to access a reply_to address.
+* Feature: Allow send_mail to receieve an EmailBackend Connection.
+* Feature: Allow send_activation_email to receieve an EmailBackend Connection.
 * Fix to resend_activation_mail for from_email and reply_to fields.
 
 Version 1.7.1, 8 August, 2017 (Greenspace-fork)

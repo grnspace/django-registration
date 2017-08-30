@@ -23,7 +23,8 @@ SHA1_RE = re.compile('^[a-f0-9]{40}$')
 
 
 def send_email(addresses_to, ctx_dict, subject_template, body_template,
-               body_html_template, from_email=None, reply_to=None):
+               body_html_template, from_email=None, reply_to=None,
+               connection=None):
     """
     Function that sends an email
     """
@@ -46,6 +47,7 @@ def send_email(addresses_to, ctx_dict, subject_template, body_template,
 
     email_message = EmailMultiAlternatives(subject, message_txt,
                                            from_email, addresses_to,
+                                           connection=connection,
                                            headers={'Reply-To': reply_to})
 
     if getattr(settings, 'REGISTRATION_EMAIL_HTML', True):
@@ -198,6 +200,7 @@ class RegistrationManager(models.Manager):
         request=None,
         from_email=None,
         reply_to=None,
+        connection=None,
     ):
         """
         Resets activation key for the user and resends activation email.
@@ -217,6 +220,7 @@ class RegistrationManager(models.Manager):
             request,
             from_email=from_email,
             reply_to=reply_to,
+            connection=connection,
         )
 
         return True
@@ -351,6 +355,7 @@ class RegistrationProfile(models.Model):
         request=None,
         from_email=None,
         reply_to=None,
+        connection=None,
     ):
         """
         Send an activation email to the user associated with this
@@ -408,6 +413,10 @@ class RegistrationProfile(models.Model):
         ``reply_to``
             Optional properly formed email address to use as the
             Reply-To header.
+
+        ``connection``
+            Optional custom EmailBackend instance. If not supplied
+            uses the default `EMAIL_BACKEND` setting.
         """
         activation_email_subject = getattr(settings, 'ACTIVATION_EMAIL_SUBJECT',
                                            'registration/activation_email_subject.txt')
@@ -439,6 +448,7 @@ class RegistrationProfile(models.Model):
 
         email_message = EmailMultiAlternatives(subject, message_txt,
                                                from_email, [self.user.email],
+                                               connection=connection,
                                                headers={'Reply-To': reply_to})
         if getattr(settings, 'REGISTRATION_EMAIL_HTML', True):
             try:
