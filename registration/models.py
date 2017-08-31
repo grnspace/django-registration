@@ -138,7 +138,8 @@ class RegistrationManager(models.Manager):
 
     def create_inactive_user(self, site, new_user=None, send_email=True,
                              request=None, profile_info={},
-                             from_email=None, reply_to=None, **user_info):
+                             from_email=None, reply_to=None,
+                             connection=None, **user_info):
         """
         Create a new, inactive ``User``, generate a
         ``RegistrationProfile`` and email its activation key to the
@@ -171,6 +172,7 @@ class RegistrationManager(models.Manager):
                 request,
                 from_email=from_email,
                 reply_to=reply_to,
+                connection=connection,
             )
 
         return new_user

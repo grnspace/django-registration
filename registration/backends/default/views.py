@@ -103,6 +103,7 @@ class RegistrationView(BaseRegistrationView):
             request=self.request,
             from_email=from_email,
             reply_to=reply_to,
+            connection=connection,
         )
         signals.user_registered.send(sender=self.__class__,
                                      user=new_user,
