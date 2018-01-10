@@ -86,6 +86,9 @@ class RegistrationView(BaseRegistrationView):
 
         """
         site = get_current_site(self.request)
+        from_email = self.get_from_email()
+        reply_to = self.get_reply_to()
+        connection = self.get_connection()
 
         if hasattr(form, 'save'):
             new_user_instance = form.save()
@@ -98,11 +101,42 @@ class RegistrationView(BaseRegistrationView):
             site=site,
             send_email=self.SEND_ACTIVATION_EMAIL,
             request=self.request,
+            from_email=from_email,
+            reply_to=reply_to,
+            connection=connection,
         )
         signals.user_registered.send(sender=self.__class__,
                                      user=new_user,
                                      request=self.request)
         return new_user
+
+    def get_from_email(self):
+        """
+        Override to return a properly formed email address to
+        use as the from field.
+
+        If None, `send_email` defaults to the `REGISTRATION_DEFAULT_FROM_EMAIL`
+        or `DEFAULT_FROM_EMAIL` settings, in that order.
+        """
+        return None
+
+    def get_reply_to(self):
+        """
+        Override to return a properly formed email address to use as the
+        Reply-To header.
+
+        If None, `send_email` defaults to the same value as from_email
+        """
+        return None
+
+    def get_connection(self):
+        """
+        Override to return an instance of EmailBackend.
+
+        If None, `send_email` defaults to using the default instance based
+        on the global EMAIL_BACKEND setting.
+        """
+        return None
 
     def registration_allowed(self):
         """
