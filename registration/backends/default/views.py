@@ -4,10 +4,10 @@ from django.shortcuts import render
 
 from ... import signals
 from ...models import RegistrationProfile
+from ...users import UserModel
 from ...views import ActivationView as BaseActivationView
 from ...views import RegistrationView as BaseRegistrationView
 from ...views import ResendActivationView as BaseResendActivationView
-from ...users import UserModel
 
 
 class RegistrationView(BaseRegistrationView):
@@ -137,13 +137,13 @@ class ActivationView(BaseActivationView):
         """
         activation_key = kwargs.get('activation_key', '')
         site = get_current_site(self.request)
-        activated_user = (self.registration_profile.objects
-                          .activate_user(activation_key, site))
-        if activated_user:
+        user, activated = self.registration_profile.objects.activate_user(
+            activation_key, site)
+        if activated:
             signals.user_activated.send(sender=self.__class__,
-                                        user=activated_user,
+                                        user=user,
                                         request=self.request)
-        return activated_user
+        return user
 
     def get_success_url(self, user):
         return ('registration_activation_complete', (), {})
@@ -155,8 +155,10 @@ class ResendActivationView(BaseResendActivationView):
 
     def resend_activation(self, form):
         """
-        Given an email, look up user by email and resend activation key if user
-        is not already activated or previous activation key has not expired.
+        Given an email, look up user by email and resend activation key
+        if user is not already activated or previous activation key has
+        not expired. Note that if multiple users exist with the given
+        email, no emails will be sent.
 
         Returns True if activation key was successfully sent, False otherwise.
 

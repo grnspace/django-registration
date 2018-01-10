@@ -1,25 +1,32 @@
 import datetime
 import hashlib
-import re
 import random
-
+import re
+import warnings
+from copy import copy
 from datetime import timedelta
 
-from django.utils import six
 from django.apps import apps
 from django.conf import settings
 from django.core import mail
 from django.core import management
-from django.test import override_settings
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
+from django.test import override_settings
+from django.utils import six
 from django.utils.timezone import now as datetime_now
 
-from registration.models import RegistrationProfile, SupervisedRegistrationProfile
+from registration.models import RegistrationProfile
+from registration.models import SupervisedRegistrationProfile
 from registration.users import UserModel
 
 Site = apps.get_model('sites', 'Site')
 
 
+@override_settings(ACCOUNT_ACTIVATION_DAYS=7,
+                   REGISTRATION_DEFAULT_FROM_EMAIL='registration@email.com',
+                   REGISTRATION_EMAIL_HTML=True,
+                   DEFAULT_FROM_EMAIL='django@email.com')
 class RegistrationModelTests(TestCase):
     """
     Test the model and manager used in the default backend.
@@ -32,25 +39,7 @@ class RegistrationModelTests(TestCase):
     registration_profile = RegistrationProfile
 
     def setUp(self):
-        self.old_activation = getattr(settings,
-                                      'ACCOUNT_ACTIVATION_DAYS', None)
-        self.old_reg_email = getattr(settings,
-                                     'REGISTRATION_DEFAULT_FROM_EMAIL', None)
-        self.old_email_html = getattr(settings,
-                                      'REGISTRATION_EMAIL_HTML', None)
-        self.old_django_email = getattr(settings,
-                                        'DEFAULT_FROM_EMAIL', None)
-
-        settings.ACCOUNT_ACTIVATION_DAYS = 7
-        settings.REGISTRATION_DEFAULT_FROM_EMAIL = 'registration@email.com'
-        settings.REGISTRATION_EMAIL_HTML = True
-        settings.DEFAULT_FROM_EMAIL = 'django@email.com'
-
-    def tearDown(self):
-        settings.ACCOUNT_ACTIVATION_DAYS = self.old_activation
-        settings.REGISTRATION_DEFAULT_FROM_EMAIL = self.old_reg_email
-        settings.REGISTRATION_EMAIL_HTML = self.old_email_html
-        settings.DEFAULT_FROM_EMAIL = self.old_django_email
+        warnings.simplefilter('always', UserWarning)
 
     def test_profile_creation(self):
         """
@@ -104,17 +93,44 @@ class RegistrationModelTests(TestCase):
         profile.send_activation_email(Site.objects.get_current())
         self.assertEqual(mail.outbox[0].from_email, 'registration@email.com')
 
+    @override_settings(REGISTRATION_DEFAULT_FROM_EMAIL=None)
     def test_activation_email_falls_back_to_django_default_from_email(self):
         """
         ``RegistrationProfile.send_activation_email`` sends an
         email.
 
         """
-        settings.REGISTRATION_DEFAULT_FROM_EMAIL = None
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.send_activation_email(Site.objects.get_current())
         self.assertEqual(mail.outbox[0].from_email, 'django@email.com')
+
+    @override_settings(REGISTRATION_USE_SITE_EMAIL=True,
+                       REGISTRATION_SITE_USER_EMAIL='admin')
+    def test_activation_email_uses_site_address(self):
+        """
+        ``RegistrationProfile.send_activation_email`` sends an
+        email with the ``from`` address configured by the site.
+
+        """
+        new_user = UserModel().objects.create_user(**self.user_info)
+        profile = self.registration_profile.objects.create_profile(new_user)
+        site = Site.objects.get_current()
+        profile.send_activation_email(site)
+        from_email = 'admin@{}'.format(site.domain)
+        self.assertEqual(mail.outbox[0].from_email, from_email)
+
+    @override_settings(REGISTRATION_USE_SITE_EMAIL=True)
+    def test_activation_email_uses_site_address_improperly_configured(self):
+        """
+        ``RegistrationProfile.send_activation_email`` won't send an email if
+        improperly configured.
+
+        """
+        new_user = UserModel().objects.create_user(**self.user_info)
+        profile = self.registration_profile.objects.create_profile(new_user)
+        with self.assertRaises(ImproperlyConfigured):
+            profile.send_activation_email(Site.objects.get_current())
 
     def test_activation_email_is_html_by_default(self):
         """
@@ -128,13 +144,13 @@ class RegistrationModelTests(TestCase):
 
         self.assertEqual(len(mail.outbox[0].alternatives), 1)
 
+    @override_settings(REGISTRATION_EMAIL_HTML=False)
     def test_activation_email_is_plain_text_if_html_disabled(self):
         """
         ``RegistrationProfile.send_activation_email`` sends a plain
         text email if settings.REGISTRATION_EMAIL_HTML is False.
 
         """
-        settings.REGISTRATION_EMAIL_HTML = False
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.send_activation_email(Site.objects.get_current())
@@ -217,6 +233,37 @@ class RegistrationModelTests(TestCase):
         profile = self.registration_profile.objects.get(user=new_user)
         self.failIf(profile.activation_key_expired())
 
+    def test_active_account_activation_key_expired(self):
+        """
+        ``RegistrationProfile.activation_key_expired()`` is ``True``
+        when the account is already active.
+
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+        profile = self.registration_profile.objects.get(user=new_user)
+        self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        profile.refresh_from_db()
+        self.failUnless(profile.activation_key_expired())
+
+    def test_active_account_and_expired_accountactivation_key_expired(self):
+        """
+        ``RegistrationProfile.activation_key_expired()`` is ``True``
+        when the account is already active and the activation window has passed.
+
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+        new_user.date_joined -= datetime.timedelta(
+            days=settings.ACCOUNT_ACTIVATION_DAYS + 1)
+        new_user.save()
+        profile = self.registration_profile.objects.get(user=new_user)
+        self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        profile.refresh_from_db()
+        self.failUnless(profile.activation_key_expired())
+
     def test_expired_account(self):
         """
         ``RegistrationProfile.activation_key_expired()`` is ``True``
@@ -240,12 +287,13 @@ class RegistrationModelTests(TestCase):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
-        self.assertEqual(activated.id, new_user.id)
-        self.failUnless(activated.is_active)
+        self.failUnless(isinstance(user, UserModel()))
+        self.assertEqual(user.id, new_user.id)
+        self.failUnless(user.is_active)
+        self.assertTrue(activated)
 
         profile = self.registration_profile.objects.get(user=new_user)
         self.assertTrue(profile.activated)
@@ -259,16 +307,17 @@ class RegistrationModelTests(TestCase):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated_profile = (self.registration_profile.objects
-                             .activate_user(profile.activation_key, Site.objects.get_current(),
-                                            get_profile=True))
+        profile, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current(), get_profile=True)
 
-        self.failUnless(isinstance(activated_profile, self.registration_profile))
-        self.assertEqual(activated_profile.id, profile.id)
-        self.failUnless(activated_profile.activated)
+        self.failUnless(isinstance(profile,
+                                   self.registration_profile))
+        self.assertEqual(profile.id, profile.id)
+        self.failUnless(profile.activated)
+        self.assertTrue(activated)
 
         new_user.refresh_from_db()
-        self.assertTrue(activated_profile.user.id, new_user.id)
+        self.assertTrue(profile.user.id, new_user.id)
         self.assertTrue(new_user.is_active)
 
     def test_expired_activation(self):
@@ -284,10 +333,10 @@ class RegistrationModelTests(TestCase):
         new_user.save()
 
         profile = self.registration_profile.objects.get(user=new_user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failIf(isinstance(activated, UserModel()))
+        self.failIf(isinstance(user, UserModel()))
         self.failIf(activated)
 
         new_user = UserModel().objects.get(username='alice')
@@ -302,8 +351,10 @@ class RegistrationModelTests(TestCase):
         fails.
 
         """
-        self.failIf(self.registration_profile.objects.activate_user(
-            'foo', Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            'foo', Site.objects.get_current())
+        self.failIf(user)
+        self.failIf(activated)
 
     def test_activation_already_activated(self):
         """
@@ -317,8 +368,10 @@ class RegistrationModelTests(TestCase):
             profile.activation_key, Site.objects.get_current())
 
         profile = self.registration_profile.objects.get(user=new_user)
-        self.assertEqual(self.registration_profile.objects.activate_user(
-            profile.activation_key, Site.objects.get_current()), new_user)
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.assertEqual(user, new_user)
+        self.assertFalse(activated)
 
     def test_activation_deactivated(self):
         """
@@ -335,9 +388,9 @@ class RegistrationModelTests(TestCase):
         new_user.save()
 
         # Try to activate again and ensure False is returned.
-        failed = self.registration_profile.objects.activate_user(
+        user, activated = self.registration_profile.objects.activate_user(
             profile.activation_key, Site.objects.get_current())
-        self.assertFalse(failed)
+        self.assertFalse(activated)
 
     def test_activation_nonexistent_key(self):
         """
@@ -348,10 +401,11 @@ class RegistrationModelTests(TestCase):
         # Due to the way activation keys are constructed during
         # registration, this will never be a valid key.
         invalid_key = hashlib.sha1(six.b('foo')).hexdigest()
-        self.failIf(self.registration_profile.objects.activate_user(
-            invalid_key, Site.objects.get_current()))
+        _, activated = self.registration_profile.objects.activate_user(
+            invalid_key, Site.objects.get_current())
+        self.failIf(activated)
 
-    def test_expired_user_deletion(self):
+    def test_expired_user_deletion_activation_window(self):
         """
         ``RegistrationProfile.objects.delete_expired_users()`` only
         deletes inactive users whose activation window has expired.
@@ -373,6 +427,32 @@ class RegistrationModelTests(TestCase):
         self.assertEqual(self.registration_profile.objects.count(), 1)
         self.assertRaises(UserModel().DoesNotExist,
                           UserModel().objects.get, username='bob')
+
+    def test_expired_user_deletion_ignore_activated(self):
+        """
+        ``RegistrationProfile.objects.delete_expired_users()`` only
+        deletes inactive users whose activation window has expired and if
+        their profile is not activated.
+
+        """
+        user = (self.registration_profile.objects
+                .create_inactive_user(
+                    site=Site.objects.get_current(),
+                    username='bob',
+                    password='secret',
+                    email='bob@example.com'))
+        profile = self.registration_profile.objects.get(user=user)
+        _, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.assertTrue(activated)
+        # Expire the activation window.
+        user.date_joined -= datetime.timedelta(
+            days=settings.ACCOUNT_ACTIVATION_DAYS + 1)
+        user.save()
+
+        self.registration_profile.objects.delete_expired_users()
+        self.assertEqual(self.registration_profile.objects.count(), 1)
+        self.assertEqual(UserModel().objects.get(username='bob'), user)
 
     def test_expired_user_deletion_missing_user(self):
         """
@@ -464,9 +544,10 @@ class RegistrationModelTests(TestCase):
             site=Site.objects.get_current(), send_email=False, **self.user_info)
 
         profile = self.registration_profile.objects.get(user=user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
-        self.assertTrue(activated.is_active)
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.assertTrue(user.is_active)
+        self.assertTrue(activated)
 
         self.assertFalse(self.registration_profile.objects.resend_activation_mail(
             email=self.user_info['email'],
@@ -488,6 +569,24 @@ class RegistrationModelTests(TestCase):
         profile = self.registration_profile.objects.get(user=new_user)
         self.assertTrue(profile.activation_key_expired())
 
+        self.assertFalse(self.registration_profile.objects.resend_activation_mail(
+            email=self.user_info['email'],
+            site=Site.objects.get_current(),
+        ))
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_resend_activation_email_nonunique_email(self):
+        """
+        Test the scenario where user tries to resend activation code
+        to the expired user's email
+        """
+        user1 = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), send_email=False, **self.user_info)
+        user2_info = copy(self.user_info)
+        user2_info['username'] = 'bob'
+        user2 = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), send_email=False, **user2_info)
+        self.assertEqual(user1.email, user2.email)
         self.assertFalse(self.registration_profile.objects.resend_activation_mail(
             email=self.user_info['email'],
             site=Site.objects.get_current(),
@@ -520,12 +619,13 @@ class RegistrationModelTests(TestCase):
         profile = self.registration_profile.objects.get(user=new_user)
 
         self.registration_profile.create_new_activation_key = current_method
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
-        self.assertEqual(activated.id, new_user.id)
-        self.failUnless(activated.is_active)
+        self.failUnless(isinstance(user, UserModel()))
+        self.assertEqual(user.id, new_user.id)
+        self.failUnless(user.is_active)
+        self.assertTrue(activated)
 
         profile = self.registration_profile.objects.get(user=new_user)
         self.assertTrue(profile.activated)
@@ -558,12 +658,13 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
-        self.assertEqual(activated.id, new_user.id)
-        self.failIf(activated.is_active)
+        self.failUnless(isinstance(user, UserModel()))
+        self.assertEqual(user.id, new_user.id)
+        self.failIf(user.is_active)
+        self.assertTrue(activated)
 
         profile = self.registration_profile.objects.get(user=new_user)
         self.assertTrue(profile.activated)
@@ -577,16 +678,17 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated_profile = (self.registration_profile.objects
-                             .activate_user(profile.activation_key, Site.objects.get_current(),
-                                            get_profile=True))
+        profile, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current(), get_profile=True)
 
-        self.failUnless(isinstance(activated_profile, self.registration_profile))
-        self.assertEqual(activated_profile.id, profile.id)
-        self.failUnless(activated_profile.activated)
+        self.failUnless(isinstance(profile,
+                                   self.registration_profile))
+        self.assertEqual(profile.id, profile.id)
+        self.failUnless(profile.activated)
+        self.assertTrue(activated)
 
         new_user.refresh_from_db()
-        self.assertTrue(activated_profile.user.id, new_user.id)
+        self.assertTrue(profile.user.id, new_user.id)
         self.assertFalse(new_user.is_active)
 
     def test_resend_activation_email_activated_user(self):
@@ -598,9 +700,10 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
             site=Site.objects.get_current(), send_email=False, **self.user_info)
 
         profile = self.registration_profile.objects.get(user=user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
-        self.assertFalse(activated.is_active)
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.assertFalse(user.is_active)
+        self.assertTrue(activated)
 
         self.assertFalse(self.registration_profile.objects.resend_activation_mail(
             email=self.user_info['email'],
@@ -609,7 +712,7 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         # Outbox has one mail, admin approve mail
 
         self.assertEqual(len(mail.outbox), 1)
-        admins_emails = [value[1] for value in settings.ADMINS]
+        admins_emails = [value[1] for value in settings.REGISTRATION_ADMINS]
         for email in mail.outbox[0].to:
             self.assertIn(email, admins_emails)
 
@@ -625,7 +728,7 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         self.registration_profile.objects.send_admin_approve_email(
             new_user, Site.objects.get_current())
         self.assertEqual(len(mail.outbox), 1)
-        admins_emails = [value[1] for value in settings.ADMINS]
+        admins_emails = [value[1] for value in settings.REGISTRATION_ADMINS]
         for email in mail.outbox[0].to:
             self.assertIn(email, admins_emails)
 
@@ -642,13 +745,13 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
             new_user, Site.objects.get_current())
         self.assertEqual(mail.outbox[0].from_email, 'registration@email.com')
 
+    @override_settings(REGISTRATION_DEFAULT_FROM_EMAIL=None)
     def test_admin_approval_email_falls_back_to_django_default_from_email(self):
         """
         ``SupervisedRegistrationManager.send_admin_approve_email`` sends an
         email.
 
         """
-        settings.REGISTRATION_DEFAULT_FROM_EMAIL = None
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.activated = True
@@ -670,13 +773,13 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
 
         self.assertEqual(len(mail.outbox[0].alternatives), 1)
 
+    @override_settings(REGISTRATION_EMAIL_HTML=False)
     def test_admin_approval_email_is_plain_text_if_html_disabled(self):
         """
         ``SupervisedRegistrationProfile.send_activation_email`` sends a plain
         text email if settings.REGISTRATION_EMAIL_HTML is False.
 
         """
-        settings.REGISTRATION_EMAIL_HTML = False
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.activated = True
@@ -684,6 +787,41 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
             new_user, Site.objects.get_current())
 
         self.assertEqual(len(mail.outbox[0].alternatives), 0)
+
+    def test_active_account_activation_key_expired(self):
+        """
+        ``SupervisedRegistrationProfile.activation_key_expired()`` is ``True``
+        when the account is already active.
+
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+        profile = self.registration_profile.objects.get(user=new_user)
+        self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.registration_profile.objects.admin_approve_user(
+            profile.id, Site.objects.get_current())
+        profile.refresh_from_db()
+        self.failUnless(profile.activation_key_expired())
+
+    def test_active_account_and_expired_accountactivation_key_expired(self):
+        """
+        ``SupervisedRegistrationProfile.activation_key_expired()`` is ``True``
+        when the account is already active and the activation window has passed.
+
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+        new_user.date_joined -= datetime.timedelta(
+            days=settings.ACCOUNT_ACTIVATION_DAYS + 1)
+        new_user.save()
+        profile = self.registration_profile.objects.get(user=new_user)
+        self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.registration_profile.objects.admin_approve_user(
+            profile.id, Site.objects.get_current())
+        profile.refresh_from_db()
+        self.failUnless(profile.activation_key_expired())
 
     def test_admin_approval_complete_email(self):
         """
@@ -709,13 +847,13 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].from_email, 'registration@email.com')
 
+    @override_settings(REGISTRATION_DEFAULT_FROM_EMAIL=None)
     def test_admin_approval_complete_email_falls_back_to_django_default_from_email(self):
         """
         ``SupervisedRegistrationManager.send_admin_approve_complete_email``
         sends an email
 
         """
-        settings.REGISTRATION_DEFAULT_FROM_EMAIL = None
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.send_admin_approve_complete_email(Site.objects.get_current())
@@ -734,13 +872,13 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(len(mail.outbox[0].alternatives), 1)
 
+    @override_settings(REGISTRATION_EMAIL_HTML=False)
     def test_admin_approval_complete_email_is_plain_text_if_html_disabled(self):
         """
         ``SupervisedRegistrationProfile.send_admin_approve_complete_email``
         sends a plain text email if settings.REGISTRATION_EMAIL_HTML is False.
 
         """
-        settings.REGISTRATION_EMAIL_HTML = False
         new_user = UserModel().objects.create_user(**self.user_info)
         profile = self.registration_profile.objects.create_profile(new_user)
         profile.send_admin_approve_complete_email(Site.objects.get_current())
@@ -757,10 +895,10 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
+        self.failUnless(isinstance(user, UserModel()))
 
         user = self.registration_profile.objects.admin_approve_user(
             profile.id, Site.objects.get_current())
@@ -788,10 +926,11 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         new_user = self.registration_profile.objects.create_inactive_user(
             site=Site.objects.get_current(), **self.user_info)
         profile = self.registration_profile.objects.get(user=new_user)
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
+        self.failUnless(isinstance(user, UserModel()))
+        self.assertTrue(activated)
 
         user = self.registration_profile.objects.admin_approve_user(
             profile.id, Site.objects.get_current())
@@ -823,13 +962,14 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
             profile.activation_key, Site.objects.get_current())
 
         profile = self.registration_profile.objects.get(user=new_user)
-        self.assertEqual(self.registration_profile.objects.activate_user(
-            profile.activation_key, Site.objects.get_current()), False)
+        _, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
+        self.assertFalse(activated)
 
     def test_activation_key_backwards_compatibility(self):
         """
-        Make sure that users created witht the old create_new_activation_key method can still be
-        activated.
+        Make sure that users created with the old create_new_activation_key
+        method can still be activated.
         """
         current_method = self.registration_profile.create_new_activation_key
 
@@ -852,12 +992,43 @@ class SupervisedRegistrationModelTests(RegistrationModelTests):
         profile = self.registration_profile.objects.get(user=new_user)
 
         self.registration_profile.create_new_activation_key = current_method
-        activated = (self.registration_profile.objects
-                     .activate_user(profile.activation_key, Site.objects.get_current()))
+        user, activated = self.registration_profile.objects.activate_user(
+            profile.activation_key, Site.objects.get_current())
 
-        self.failUnless(isinstance(activated, UserModel()))
-        self.assertEqual(activated.id, new_user.id)
-        self.failIf(activated.is_active)
+        self.failUnless(isinstance(user, UserModel()))
+        self.assertEqual(user.id, new_user.id)
+        self.failIf(user.is_active)
+        self.assertTrue(activated)
 
         profile = self.registration_profile.objects.get(user=new_user)
         self.assertTrue(profile.activated)
+
+    @override_settings(ADMINS=(), REGISTRATION_ADMINS=())
+    def test_no_admins_registered(self):
+        """
+        Approving a non existent user profile does nothing and returns False
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+
+        with self.assertRaises(ImproperlyConfigured):
+            self.registration_profile.objects.send_admin_approve_email(
+                new_user, Site.objects.get_current())
+
+    @override_settings(REGISTRATION_ADMINS=())
+    def test_no_registration_admins_registered(self):
+        """
+        Approving a non existent user profile does nothing and returns False
+        """
+        new_user = self.registration_profile.objects.create_inactive_user(
+            site=Site.objects.get_current(), **self.user_info)
+
+        with warnings.catch_warnings(record=True) as _warning:
+            self.registration_profile.objects.send_admin_approve_email(
+                new_user, Site.objects.get_current())
+
+            assertion_error = '''No warning triggered for unregistered
+             REGISTRATION_ADMINS'''
+            self.assertTrue(len(_warning) > 0, assertion_error)
+            self.assertTrue('REGISTRATION_ADMINS' in str(_warning[-1].message),
+                            assertion_error)

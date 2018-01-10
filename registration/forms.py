@@ -9,12 +9,12 @@ you're using a custom model.
 """
 from __future__ import unicode_literals
 
-
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.utils.translation import ugettext_lazy as _
 
-from .users import UserModel, UsernameField
+from .users import UserModel
+from .users import UsernameField
 
 User = UserModel()
 
@@ -95,7 +95,7 @@ class RegistrationFormNoFreeEmail(RegistrationForm):
     bad_domains = ['aim.com', 'aol.com', 'email.com', 'gmail.com',
                    'googlemail.com', 'hotmail.com', 'hushmail.com',
                    'msn.com', 'mail.ru', 'mailinator.com', 'live.com',
-                   'yahoo.com']
+                   'yahoo.com', 'outlook.com']
 
     def clean_email(self):
         """

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
-from django.db import models, migrations
+from django.db import migrations
+from django.db import models
 
 
 class Migration(migrations.Migration):
@@ -14,7 +15,14 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='SupervisedRegistrationProfile',
             fields=[
-                ('registrationprofile_ptr', models.OneToOneField(parent_link=True, auto_created=True, primary_key=True, serialize=False, to='registration.RegistrationProfile')),
+                ('registrationprofile_ptr', models.OneToOneField(
+                    parent_link=True,
+                    auto_created=True,
+                    on_delete=models.CASCADE,
+                    primary_key=True,
+                    serialize=False,
+                    to='registration.RegistrationProfile')
+                 ),
             ],
             bases=('registration.registrationprofile',),
         ),

@@ -1,34 +1,31 @@
 from __future__ import unicode_literals
+
+from django.test import TestCase
+from django.test.utils import override_settings
+
+from registration import forms
+from registration.users import UsernameField
+
 try:
     from importlib import reload  # Python 3.4+
 except ImportError:
     try:
         from imp import reload  # Python 3.3
-    except:
+    except Exception:
         pass  # Python 2 reload()
 
 
-from django.conf import settings
-from django.test import TestCase
-
-from registration import forms
-from registration.users import UsernameField
-
-
+@override_settings(AUTH_USER_MODEL='test_app.CustomUser')
 class RegistrationFormTests(TestCase):
     """
     Test the default registration forms.
 
     """
+
     def setUp(self):
-        self.old_auth_model = getattr(settings, 'AUTH_USER_MODEL', None)
-        settings.AUTH_USER_MODEL = 'test_app.CustomUser'
         # The form's Meta class is created on import. We have to reload()
         # to apply the new AUTH_USER_MODEL to the Meta class.
         reload(forms)
-
-    def tearDown(self):
-        settings.AUTH_USER_MODEL = self.old_auth_model
 
     def test_registration_form_adds_custom_user_name_field(self):
         """

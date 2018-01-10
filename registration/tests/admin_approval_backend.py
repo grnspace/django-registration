@@ -1,9 +1,11 @@
-from django.core.urlresolvers import reverse
 from django.test.utils import override_settings
-from registration.models import SupervisedRegistrationProfile
-from registration.backends.admin_approval.views import RegistrationView
-from registration.users import UserModel
+from django.urls import reverse
+
 from .default_backend import DefaultBackendViewTests
+
+from registration.backends.admin_approval.views import RegistrationView
+from registration.models import SupervisedRegistrationProfile
+from registration.users import UserModel
 
 
 @override_settings(ROOT_URLCONF='test_app.urls_admin_approval')

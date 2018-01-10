@@ -45,6 +45,15 @@ This backend makes use of the following settings:
 ``REGISTRATION_FORM``
     A string dotted path to the desired registration form.
 
+``ACTIVATION_EMAIL_SUBJECT``
+    A string slashed path to the desired template for the activation email subject.
+    
+``ACTIVATION_EMAIL_BODY``
+    A string slashed path to the desired template for the activation email body.
+    
+``ACTIVATION_EMAIL_HTML``
+    A string slashed path tot the desired template for the activation email html.
+
 By default, this backend uses
 :class:`registration.forms.RegistrationForm` as its form class for
 user registration; this can be overridden by passing the keyword
@@ -208,15 +217,15 @@ Additionally, :class:`RegistrationProfile` has a custom manager
       :class:`RegistrationProfile` for the account will be set to
       ``True`` after successful activation.
 
-      Returns the ``User`` instance representing the account if
-      activation is successful, ``False`` otherwise.
+      Returns a tuple of (``User``, ``activated``) representing the account if
+      activation is successful and whether the ``User`` was activated or not.
 
       :param activation_key: The activation key to use for the
          activation.
       :type activation_key: string, a 40-character SHA1 hexdigest
       :type site: ``django.contrib.sites.models.Site`` or
         ``django.contrib.sites.models.RequestSite``
-      :rtype: ``User`` or bool
+      :rtype: (``User``, ``bool)
 
    .. method:: delete_expired_users
 

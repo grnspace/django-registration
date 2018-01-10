@@ -3,19 +3,21 @@ Views which allow users to create and activate accounts.
 
 """
 
-from django.shortcuts import redirect
-from django.views.generic.base import TemplateView
-from django.views.generic.edit import FormView
 from django.conf import settings
+from django.shortcuts import redirect
 from django.utils.decorators import method_decorator
 from django.utils.module_loading import import_string
 from django.views.decorators.debug import sensitive_post_parameters
+from django.views.generic.base import TemplateView
+from django.views.generic.edit import FormView
 
 from registration.forms import ResendActivationForm
 
 REGISTRATION_FORM_PATH = getattr(settings, 'REGISTRATION_FORM',
                                  'registration.forms.RegistrationForm')
 REGISTRATION_FORM = import_string(REGISTRATION_FORM_PATH)
+ACCOUNT_AUTHENTICATED_REGISTRATION_REDIRECTS = getattr(
+    settings, 'ACCOUNT_AUTHENTICATED_REGISTRATION_REDIRECTS', True)
 
 
 class RegistrationView(FormView):
@@ -32,10 +34,20 @@ class RegistrationView(FormView):
     @method_decorator(sensitive_post_parameters('password1', 'password2'))
     def dispatch(self, request, *args, **kwargs):
         """
-        Check that user signup is allowed before even bothering to
+        Check that user signup is allowed and if user is logged in before even bothering to
         dispatch or do other processing.
 
         """
+        if ACCOUNT_AUTHENTICATED_REGISTRATION_REDIRECTS:
+            if self.request.user.is_authenticated:
+                if settings.LOGIN_REDIRECT_URL is not None:
+                    return redirect(settings.LOGIN_REDIRECT_URL)
+                else:
+                    raise Exception((
+                        'You must set a URL with LOGIN_REDIRECT_URL in '
+                        'settings.py or set '
+                        'ACCOUNT_AUTHENTICATED_REGISTRATION_REDIRECTS=False'))
+
         if not self.registration_allowed():
             return redirect(self.disallowed_url)
         return super(RegistrationView, self).dispatch(request, *args, **kwargs)
@@ -135,6 +147,7 @@ class ResendActivationView(FormView):
         Implement rendering of confirmation template here.
 
         """
+        raise NotImplementedError
 
 
 class ApprovalView(TemplateView):

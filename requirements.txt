@@ -1,7 +1,5 @@
-flake8
-coveralls
+-rtest-requirements.txt
 Sphinx
 twine
-Django>1.8
-invoke==0.12.2
-docutils==0.12
+pytest>3.2.1
+Django>1.11

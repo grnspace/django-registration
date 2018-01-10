@@ -1,13 +1,12 @@
 .. -*-restructuredtext-*-
 
 :Description: Django-registration provides user registration functionality for Django websites.
-:maintainers: Macropin_, DiCato_, and Joshblum_
+:maintainers: Macropin_, DiCato_, and joshblum_
 :contributors: `list of contributors <https://github.com/macropin/django-registration/graphs/contributors>`_
 
 .. _Macropin: https://github.com/macropin
 .. _DiCato: https://github.com/dicato
-.. _Joshblum: https://github.com/joshblum
-
+.. _joshblum: https://github.com/joshblum
 
 .. image:: https://travis-ci.org/macropin/django-registration.svg?branch=master
     :target: https://travis-ci.org/macropin/django-registration
@@ -22,17 +21,14 @@
     :target: http://django-registration-redux.readthedocs.org/en/latest/?badge=latest
     :alt: Documentation Status
 
+.. image:: https://img.shields.io/pypi/pyversions/django-registration-redux.svg
+    :target: https://pypi.python.org/pypi/django-registration-redux
 
 If you have issues with the "django-registration-redux" package then please `raise them here`_.
 
-This is a fairly simple user-registration application for Django,
-designed to make allowing user signups as painless as possible. It
-requires a functional installation of Django 1.8 or newer, but has no
-other dependencies.
-
-For instructions on how to use this application, and on
-what it provides, see the file "quickstart.rst" in the "docs/"
-directory. Full documentation is also `available online`_
+This is a fairly simple user-registration application for Django, designed to
+make allowing user signups as painless as possible. It requires a functional
+installation of Django 1.11 or newer, but has no other dependencies.
 
 
 Installation
@@ -55,7 +51,15 @@ somewhere on your Python path; this is useful if you're working from a
 Git checkout.
 
 Note that this application requires Python 2.7/3.4 or later, and a
-functional installation of Django 1.8 or newer.
+functional installation of Django 1.11 or newer.
+
+If you are running on Django <=1.11, you can install a previous version of
+`django-registration-redux`, which supports older versions of Django. See the
+`CHANGELOG`_ for support details. Older versions will receive minor bug fixes as
+needed, but are no longer actively developed::
+
+    pip install django-registration-redux==1.9
+
 
 Getting started with development
 --------------------------------
@@ -103,3 +107,4 @@ Django-registration-redux is licensed under `BSD License`.
 
 .. _`available online`: https://django-registration-redux.readthedocs.org/
 .. _`raise them here`: https://github.com/macropin/django-registration/issues
+.. _`CHANGELOG`: https://github.com/macropin/django-registration/blob/master/CHANGELOG

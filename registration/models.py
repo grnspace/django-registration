@@ -2,14 +2,19 @@ from __future__ import unicode_literals
 
 import datetime
 import hashlib
+import logging
 import re
 import string
+import warnings
 
+from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import MultipleObjectsReturned
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.mail import EmailMultiAlternatives
-from django.db import models, transaction
+from django.db import models
+from django.db import transaction
 from django.template import TemplateDoesNotExist
 from django.template.loader import render_to_string
 from django.utils.crypto import get_random_string
@@ -17,9 +22,34 @@ from django.utils.encoding import python_2_unicode_compatible
 from django.utils.timezone import now as datetime_now
 from django.utils.translation import ugettext_lazy as _
 
-from .users import UserModel, UserModelString
+from .users import UserModel
+from .users import UserModelString
 
+logger = logging.getLogger(__name__)
 SHA1_RE = re.compile('^[a-f0-9]{40}$')
+
+
+def get_from_email(site=None):
+    """
+    Return the email address by which mail is sent.
+    If the `REGISTRATION_USE_SITE_EMAIL` setting is set, the `Site` object will
+    provide the domain and the REGISTRATION_SITE_USER_EMAIL will provide the
+    username. Otherwise the `REGISTRATION_DEFAULT_FROM_EMAIL` or
+    `DEFAULT_FROM_EMAIL` settings are used.
+    """
+    if getattr(settings, 'REGISTRATION_USE_SITE_EMAIL', False):
+        user_email = getattr(settings, 'REGISTRATION_SITE_USER_EMAIL', None)
+        if not user_email:
+            raise ImproperlyConfigured((
+                'REGISTRATION_SITE_USER_EMAIL must be set when using '
+                'REGISTRATION_USE_SITE_EMAIL.'))
+        Site = apps.get_model('sites', 'Site')
+        site = site or Site.objects.get_current()
+        from_email = '{}@{}'.format(user_email, site.domain)
+    else:
+        from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
+                             settings.DEFAULT_FROM_EMAIL)
+    return from_email
 
 
 def send_email(addresses_to, ctx_dict, subject_template, body_template,
@@ -34,8 +64,7 @@ def send_email(addresses_to, ctx_dict, subject_template, body_template,
     )
     # Email subject *must not* contain newlines
     subject = ''.join(subject.splitlines())
-    from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
-                         settings.DEFAULT_FROM_EMAIL)
+    from_email = get_from_email(ctx_dict.get('site'))
     message_txt = render_to_string(body_template,
                                    ctx_dict)
 
@@ -83,18 +112,21 @@ class RegistrationManager(models.Manager):
 
     def activate_user(self, activation_key, site, get_profile=False):
         """
-        Validate an activation key and activate the corresponding
-        ``User`` if valid.
+        Validate an activation key and activate the corresponding ``User`` if
+        valid, returns a tuple of (``User``, ``activated``). The activated flag
+        indicates if the user was newly activated or an error occurred.
 
-        If the key is valid and has not expired, return the ``User``
-        after activating.
+        If the key is valid and has not expired, return the (``User``,
+        ``True``) after activating.
 
-        If the key is not valid or has expired, return ``False``.
+        If the key is not valid or has expired, return (``User`` or ``False``,
+        ``False``).
 
         If the key is valid but the ``User`` is already active,
-        return ``User``.
+        return (``User``, ``False``).
 
-        If the key is valid but the ``User`` is inactive, return ``False``.
+        If the key is valid but the ``User`` is inactive, return (``User``,
+        ``False``).
 
         To prevent reactivation of an account which has been
         deactivated by site administrators, ``RegistrationProfile.activated``
@@ -111,7 +143,7 @@ class RegistrationManager(models.Manager):
                 # This is an actual activation failure as the activation
                 # key does not exist. It is *not* the scenario where an
                 # already activated User reuses an activation key.
-                return False
+                return (False, False)
 
             if profile.activated:
                 # The User has already activated and is trying to activate
@@ -119,14 +151,14 @@ class RegistrationManager(models.Manager):
                 # return False as the User has been deactivated by a site
                 # administrator.
                 if profile.user.is_active:
-                    return profile.user
+                    return (profile.user, False)
                 else:
-                    return False
+                    return (profile.user, False)
 
             if not profile.activation_key_expired():
-                return self._activate(profile, site, get_profile)
+                return (self._activate(profile, site, get_profile), True)
 
-        return False
+        return (False, False)
 
     def create_inactive_user(self, site, new_user=None, send_email=True,
                              request=None, profile_info={}, **user_info):
@@ -187,7 +219,8 @@ class RegistrationManager(models.Manager):
             profile = self.get(user__email__iexact=email)
         except ObjectDoesNotExist:
             return False
-        # TODO: Catch multiple objects returned exception?
+        except MultipleObjectsReturned:
+            return False
 
         if profile.activated or profile.activation_key_expired():
             return False
@@ -202,12 +235,11 @@ class RegistrationManager(models.Manager):
         Remove expired instances of ``RegistrationProfile`` and their
         associated ``User``s.
 
-        Accounts to be deleted are identified by searching for
-        instances of ``RegistrationProfile`` with expired activation
-        keys, and then checking to see if their associated ``User``
-        instances have the field ``is_active`` set to ``False``; any
-        ``User`` who is both inactive and has an expired activation
-        key will be deleted.
+        Accounts to be deleted are identified by searching for instances of
+        ``RegistrationProfile`` with expired activation keys and an
+        ``activated`` field that is set to ``False``. If these conditions are
+        met both the ``RegistrationProfile`` and the ``User`` objects will be
+        deleted.
 
         It is recommended that this method be executed regularly as
         part of your routine site maintenance; this application
@@ -239,12 +271,13 @@ class RegistrationManager(models.Manager):
         """
         for profile in self.all():
             try:
-                if profile.activation_key_expired():
+                if profile.activation_key_expired() and not profile.activated:
                     user = profile.user
-                    if not user.is_active:
-                        profile.delete()
-                        user.delete()
+                    logger.warning('Deleting expired Registration profile {} and user {}.'.format(profile, user))
+                    profile.delete()
+                    user.delete()
             except UserModel().DoesNotExist:
+                logger.warning('Deleting expired Registration profile'.format(profile))
                 profile.delete()
 
 
@@ -286,8 +319,10 @@ class RegistrationProfile(models.Model):
         """
         Create a new activation key for the user
         """
-        random_string = get_random_string(length=32, allowed_chars=string.printable)
-        self.activation_key = hashlib.sha1(random_string.encode('utf-8')).hexdigest()
+        random_string = get_random_string(
+            length=32, allowed_chars=string.printable)
+        self.activation_key = hashlib.sha1(
+            random_string.encode('utf-8')).hexdigest()
 
         if save:
             self.save()
@@ -319,7 +354,6 @@ class RegistrationProfile(models.Model):
             days=settings.ACCOUNT_ACTIVATION_DAYS)
         return (self.activated or
                 (self.user.date_joined + expiration_date <= datetime_now()))
-    activation_key_expired.boolean = True
 
     def send_activation_email(self, site, request=None):
         """
@@ -389,8 +423,7 @@ class RegistrationProfile(models.Model):
                        activation_email_subject, ctx_dict, request=request))
         # Email subject *must not* contain newlines
         subject = ''.join(subject.splitlines())
-        from_email = getattr(settings, 'REGISTRATION_DEFAULT_FROM_EMAIL',
-                             settings.DEFAULT_FROM_EMAIL)
+        from_email = get_from_email(site)
         message_txt = render_to_string(activation_email_body,
                                        ctx_dict, request=request)
 
@@ -410,6 +443,32 @@ class RegistrationProfile(models.Model):
 
 
 class SupervisedRegistrationManager(RegistrationManager):
+
+    def activation_key_expired(self):
+        """
+        Determine whether this ``RegistrationProfile``'s activation
+        key has expired, returning a boolean -- ``True`` if the key
+        has expired.
+
+        Key expiration is determined by a two-step process:
+
+        1. If the user has already activated, ``self.activated`` and
+        `self.user.is_active`` will be ``True``.  Re-activating is not
+        permitted, and so this method returns ``True`` in this case.
+
+        2. Otherwise, the date the user signed up is incremented by the number
+        of days specified in the setting ``ACCOUNT_ACTIVATION_DAYS`` (which
+        should be the number of days after signup during which a user is
+        allowed to activate their account); if the result is less than or equal
+        to the current date, the key has expired and this method returns
+        ``True``.
+        """
+        expiration_date = datetime.timedelta(
+            days=settings.ACCOUNT_ACTIVATION_DAYS)
+        # A user is only considered activated when the entire registration
+        # process is completed (i.e. an admin has approved the account)
+        is_activated = self.activated and self.user.is_active
+        return (is_activated or self.user.date_joined + expiration_date <= datetime_now())
 
     def _activate(self, profile, site, get_profile):
         """
@@ -541,11 +600,20 @@ class SupervisedRegistrationManager(RegistrationManager):
             'profile_id': user.registrationprofile.id,
             'site': site,
         }
-        admins = getattr(settings, 'ADMINS', None)
+        registration_admins = getattr(settings, 'REGISTRATION_ADMINS', None)
+        admins = registration_admins or getattr(settings, 'ADMINS', None)
+
+        if not registration_admins:
+            warnings.warn('No registration admin defined in'
+                          ' settings.REGISTRATION_ADMINS.'
+                          ' Using settings.ADMINS for the admin approval',
+                          UserWarning)
         if not admins:
             raise ImproperlyConfigured(
                 'Using the admin_approval registration backend'
-                ' requires at least one admin in settings.ADMINS')
+                ' requires at least one admin in settings.ADMINS'
+                ' or settings.REGISTRATION_ADMINS')
+
         admins = [admin[1] for admin in admins]
         send_email(
             admins, ctx_dict, admin_approve_email_subject,
