@@ -1,8 +1,5 @@
-from __future__ import unicode_literals
-
 import django
 from django.test import TestCase
-from django.utils import six
 
 from registration import forms
 from registration.users import UserModel
@@ -27,10 +24,10 @@ class RegistrationFormTests(TestCase):
             'Enter a valid username. This value may contain only letters, '
             'numbers, and @/./+/-/_ characters.'
         )
-        if django.VERSION < (1, 10):
-            bad_username_error = bad_username_error.replace('numbers,', 'numbers')
-        elif six.PY2:
-            bad_username_error = bad_username_error.replace('letters', 'English letters')
+        password_didnt_match_error = "The two password fields didn't match."
+        if django.VERSION >= (3, 0):
+            password_didnt_match_error = "The two password fields didn’t match."
+
         invalid_data_dicts = [
             # Non-alphanumeric username.
             {'data': {'username': 'foo/bar',
@@ -49,12 +46,12 @@ class RegistrationFormTests(TestCase):
                       'email': 'foo@example.com',
                       'password1': 'foo',
                       'password2': 'bar'},
-             'error': ('password2', ["The two password fields didn't match."])},
+             'error': ('password2', [password_didnt_match_error])},
         ]
 
         for invalid_dict in invalid_data_dicts:
             form = forms.RegistrationForm(data=invalid_dict['data'])
-            self.failIf(form.is_valid())
+            self.assertFalse(form.is_valid())
             self.assertEqual(form.errors[invalid_dict['error'][0]],
                              invalid_dict['error'][1])
 
@@ -62,7 +59,7 @@ class RegistrationFormTests(TestCase):
                                             'email': 'foo@example.com',
                                             'password1': 'foo',
                                             'password2': 'foo'})
-        self.failUnless(form.is_valid())
+        self.assertTrue(form.is_valid())
 
     def test_registration_form_username_lowercase(self):
         """
@@ -78,7 +75,7 @@ class RegistrationFormTests(TestCase):
                                                              'email': 'alice@example.com',
                                                              'password1': 'foo',
                                                              'password2': 'foo'})
-        self.failIf(form.is_valid())
+        self.assertFalse(form.is_valid())
         self.assertEqual(form.errors['username'],
                          ["A user with that username already exists."])
 
@@ -86,7 +83,7 @@ class RegistrationFormTests(TestCase):
                                                              'email': 'alice@example.com',
                                                              'password1': 'foo',
                                                              'password2': 'foo'})
-        self.failUnless(form.is_valid())
+        self.assertTrue(form.is_valid())
 
     def test_registration_form_tos(self):
         """
@@ -98,7 +95,7 @@ class RegistrationFormTests(TestCase):
                                                           'email': 'foo@example.com',
                                                           'password1': 'foo',
                                                           'password2': 'foo'})
-        self.failIf(form.is_valid())
+        self.assertFalse(form.is_valid())
         self.assertEqual(form.errors['tos'],
                          ["You must agree to the terms to register"])
 
@@ -107,7 +104,7 @@ class RegistrationFormTests(TestCase):
                                                           'password1': 'foo',
                                                           'password2': 'foo',
                                                           'tos': 'on'})
-        self.failUnless(form.is_valid())
+        self.assertTrue(form.is_valid())
 
     def test_registration_form_unique_email(self):
         """
@@ -123,7 +120,7 @@ class RegistrationFormTests(TestCase):
                                                        'email': 'alice@example.com',
                                                        'password1': 'foo',
                                                        'password2': 'foo'})
-        self.failIf(form.is_valid())
+        self.assertFalse(form.is_valid())
         self.assertEqual(form.errors['email'],
                          ["This email address is already in use. Please supply a different email address."])
 
@@ -131,7 +128,7 @@ class RegistrationFormTests(TestCase):
                                                        'email': 'foo@example.com',
                                                        'password1': 'foo',
                                                        'password2': 'foo'})
-        self.failUnless(form.is_valid())
+        self.assertTrue(form.is_valid())
 
     def test_registration_form_no_free_email(self):
         """
@@ -146,10 +143,10 @@ class RegistrationFormTests(TestCase):
             invalid_data = base_data.copy()
             invalid_data['email'] = "foo@%s" % domain
             form = forms.RegistrationFormNoFreeEmail(data=invalid_data)
-            self.failIf(form.is_valid())
+            self.assertFalse(form.is_valid())
             self.assertEqual(form.errors['email'],
                              ["Registration using free email addresses is prohibited. Please supply a different email address."])
 
         base_data['email'] = 'foo@example.com'
         form = forms.RegistrationFormNoFreeEmail(data=base_data)
-        self.failUnless(form.is_valid())
+        self.assertTrue(form.is_valid())

@@ -3,10 +3,12 @@ import datetime
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.core import mail
-from django.test import TestCase
+from django.db import DatabaseError
+from django.test import TransactionTestCase
 from django.test.client import RequestFactory
 from django.test.utils import override_settings
 from django.urls import reverse
+from mock import patch
 
 from registration.backends.default.views import RegistrationView
 from registration.forms import RegistrationForm
@@ -16,7 +18,7 @@ from registration.users import UserModel
 
 @override_settings(ROOT_URLCONF='test_app.urls_default',
                    ACCOUNT_ACTIVATION_DAYS=7)
-class DefaultBackendViewTests(TestCase):
+class DefaultBackendViewTests(TransactionTestCase):
     """
     Test the default registration backend.
 
@@ -66,8 +68,7 @@ class DefaultBackendViewTests(TestCase):
         self.assertEqual(200, resp.status_code)
         self.assertTemplateUsed(resp,
                                 'registration/registration_form.html')
-        self.failUnless(isinstance(resp.context['form'],
-                                   RegistrationForm))
+        self.assertIsInstance(resp.context['form'], RegistrationForm)
 
     def test_registration(self):
         """
@@ -85,11 +86,11 @@ class DefaultBackendViewTests(TestCase):
 
         new_user = UserModel().objects.get(username='bob')
 
-        self.failUnless(new_user.check_password('secret'))
+        self.assertTrue(new_user.check_password('secret'))
         self.assertEqual(new_user.email, 'bob@example.com')
 
         # New user must not be active.
-        self.failIf(new_user.is_active)
+        self.assertFalse(new_user.is_active)
 
         # A registration profile was created, and an activation email
         # was sent.
@@ -98,7 +99,7 @@ class DefaultBackendViewTests(TestCase):
 
     def test_registration_no_email(self):
         """
-        Overriden Registration view does not send an activation email if the
+        Overridden Registration view does not send an activation email if the
         associated class variable is set to ``False``
 
         """
@@ -139,10 +140,10 @@ class DefaultBackendViewTests(TestCase):
 
         new_user = UserModel().objects.get(username='bob')
 
-        self.failUnless(new_user.check_password('secret'))
+        self.assertTrue(new_user.check_password('secret'))
         self.assertEqual(new_user.email, 'bob@example.com')
 
-        self.failIf(new_user.is_active)
+        self.assertFalse(new_user.is_active)
 
         self.assertEqual(self.registration_profile.objects.count(), 1)
         self.assertEqual(len(mail.outbox), 1)
@@ -158,8 +159,24 @@ class DefaultBackendViewTests(TestCase):
                                       'password1': 'secret',
                                       'password2': 'notsecret'})
         self.assertEqual(200, resp.status_code)
-        self.failIf(resp.context['form'].is_valid())
+        self.assertFalse(resp.context['form'].is_valid())
         self.assertEqual(0, len(mail.outbox))
+
+    @patch('registration.models.RegistrationManager.create_inactive_user')
+    def test_registration_exception(self, create_inactive_user):
+        """
+        User is not created beforehand if an exception occurred at
+        creating registration profile.
+        """
+        create_inactive_user.side_effect = DatabaseError()
+        valid_data = {'username': 'bob',
+                      'email': 'bob@example.com',
+                      'password1': 'secret',
+                      'password2': 'secret'}
+        with self.assertRaises(DatabaseError):
+            self.client.post(reverse('registration_register'),
+                             data=valid_data)
+        assert not UserModel().objects.filter(username='bob').exists()
 
     def test_activation(self):
         """

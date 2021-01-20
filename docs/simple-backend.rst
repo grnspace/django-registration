@@ -25,9 +25,9 @@ To use this backend, simply include the URLconf
 ``registration.backends.simple.urls`` somewhere in your site's own URL
 configuration. For example::
 
-    url(r'^accounts/', include('registration.backends.simple.urls')),
+    path('accounts/', include('registration.backends.simple.urls')),
 
-No additional settings are required, but one optional setting is
+No additional settings are required, but two optional settings are
 supported:
 
 ``REGISTRATION_OPEN``

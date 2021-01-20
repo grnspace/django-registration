@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import datetime
 import hashlib
 import logging
@@ -18,15 +16,18 @@ from django.db import transaction
 from django.template import TemplateDoesNotExist
 from django.template.loader import render_to_string
 from django.utils.crypto import get_random_string
-from django.utils.encoding import python_2_unicode_compatible
+from django.utils.module_loading import import_string
 from django.utils.timezone import now as datetime_now
-from django.utils.translation import ugettext_lazy as _
 
 from .users import UserModel
 from .users import UserModelString
+from .utils import _
 
 logger = logging.getLogger(__name__)
-SHA1_RE = re.compile('^[a-f0-9]{40}$')
+
+# Adding some backwards compatibility for SHA1
+# The 40 probably should be removed later on
+SHA256_RE = re.compile('^[a-f0-9]{40,64}$')
 
 
 def get_from_email(site=None):
@@ -57,11 +58,9 @@ def send_email(addresses_to, ctx_dict, subject_template, body_template,
     """
     Function that sends an email
     """
-    subject = (
-        getattr(settings, 'REGISTRATION_EMAIL_SUBJECT_PREFIX', '') +
-        render_to_string(
-            subject_template, ctx_dict)
-    )
+
+    prefix = getattr(settings, 'REGISTRATION_EMAIL_SUBJECT_PREFIX', '')
+    subject = prefix + render_to_string(subject_template, ctx_dict)
     # Email subject *must not* contain newlines
     subject = ''.join(subject.splitlines())
     from_email = get_from_email(ctx_dict.get('site'))
@@ -134,9 +133,10 @@ class RegistrationManager(models.Manager):
 
         """
         # Make sure the key we're trying conforms to the pattern of a
-        # SHA1 hash; if it doesn't, no point trying to look it up in
+        # SHA256 hash; if it doesn't, no point trying to look it up in
         # the database.
-        if SHA1_RE.search(activation_key):
+        # The or statement is used
+        if SHA256_RE.search(activation_key):
             try:
                 profile = self.get(activation_key=activation_key)
             except self.model.DoesNotExist:
@@ -150,10 +150,7 @@ class RegistrationManager(models.Manager):
                 # again. If the User is active, return the User. Else,
                 # return False as the User has been deactivated by a site
                 # administrator.
-                if profile.user.is_active:
-                    return (profile.user, False)
-                else:
-                    return (profile.user, False)
+                return (profile.user, False)
 
             if not profile.activation_key_expired():
                 return (self._activate(profile, site, get_profile), True)
@@ -188,8 +185,12 @@ class RegistrationManager(models.Manager):
             registration_profile = self.create_profile(
                 new_user, **profile_info)
 
-        if send_email:
-            registration_profile.send_activation_email(site, request)
+            # send email only if desired and transaction succeeds
+            if send_email:
+                transaction.on_commit(
+                    lambda: registration_profile.send_activation_email(
+                        site, request)
+                )
 
         return new_user
 
@@ -199,7 +200,7 @@ class RegistrationManager(models.Manager):
         ``User``, and return the ``RegistrationProfile``.
 
         The activation key for the ``RegistrationProfile`` will be a
-        SHA1 hash, generated from a secure random string.
+        SHA256 hash, generated from a secure random string.
 
         """
         profile = self.model(user=user, **profile_info)
@@ -249,7 +250,7 @@ class RegistrationManager(models.Manager):
         Regularly clearing out accounts which have never been
         activated serves two useful purposes:
 
-        1. It alleviates the ocasional need to reset a
+        1. It alleviates the occasional need to reset a
            ``RegistrationProfile`` and/or re-send an activation email
            when a user does not receive or does not act upon the
            initial activation email; since the account will be
@@ -269,19 +270,22 @@ class RegistrationManager(models.Manager):
         be deleted.
 
         """
-        for profile in self.all():
+        profiles = self.filter(
+            models.Q(user__is_active=False) | models.Q(user=None),
+            activated=False,
+        )
+        for profile in profiles:
             try:
-                if profile.activation_key_expired() and not profile.activated:
+                if profile.activation_key_expired():
                     user = profile.user
                     logger.warning('Deleting expired Registration profile {} and user {}.'.format(profile, user))
                     profile.delete()
                     user.delete()
             except UserModel().DoesNotExist:
-                logger.warning('Deleting expired Registration profile'.format(profile))
+                logger.warning('Deleting expired Registration profile {}'.format(profile))
                 profile.delete()
 
 
-@python_2_unicode_compatible
 class RegistrationProfile(models.Model):
     """
     A simple profile which stores an activation key for use during
@@ -303,7 +307,7 @@ class RegistrationProfile(models.Model):
         on_delete=models.CASCADE,
         verbose_name=_('user'),
     )
-    activation_key = models.CharField(_('activation key'), max_length=40)
+    activation_key = models.CharField(_('activation key'), max_length=64)
     activated = models.BooleanField(default=False)
 
     objects = RegistrationManager()
@@ -321,8 +325,8 @@ class RegistrationProfile(models.Model):
         """
         random_string = get_random_string(
             length=32, allowed_chars=string.printable)
-        self.activation_key = hashlib.sha1(
-            random_string.encode('utf-8')).hexdigest()
+        self.activation_key = hashlib.sha256(
+            random_string.encode()).hexdigest()
 
         if save:
             self.save()
@@ -350,10 +354,10 @@ class RegistrationProfile(models.Model):
            method returns ``True``.
 
         """
-        expiration_date = datetime.timedelta(
+        max_expiry_days = datetime.timedelta(
             days=settings.ACCOUNT_ACTIVATION_DAYS)
-        return (self.activated or
-                (self.user.date_joined + expiration_date <= datetime_now()))
+        expiration_date = self.user.date_joined + max_expiry_days
+        return self.activated or expiration_date <= datetime_now()
 
     def send_activation_email(self, site, request=None):
         """
@@ -361,7 +365,7 @@ class RegistrationProfile(models.Model):
         ``RegistrationProfile``.
 
         The activation email will use the following templates,
-        which can be overriden by setting ACTIVATION_EMAIL_SUBJECT,
+        which can be overridden by setting ACTIVATION_EMAIL_SUBJECT,
         ACTIVATION_EMAIL_BODY, and ACTIVATION_EMAIL_HTML appropriately:
 
         ``registration/activation_email_subject.txt``
@@ -418,9 +422,11 @@ class RegistrationProfile(models.Model):
             'expiration_days': settings.ACCOUNT_ACTIVATION_DAYS,
             'site': site,
         }
-        subject = (getattr(settings, 'REGISTRATION_EMAIL_SUBJECT_PREFIX', '') +
-                   render_to_string(
-                       activation_email_subject, ctx_dict, request=request))
+        prefix = getattr(settings, 'REGISTRATION_EMAIL_SUBJECT_PREFIX', '')
+        subject = prefix + render_to_string(
+            activation_email_subject, ctx_dict, request=request
+        )
+
         # Email subject *must not* contain newlines
         subject = ''.join(subject.splitlines())
         from_email = get_from_email(site)
@@ -537,7 +543,7 @@ class SupervisedRegistrationManager(RegistrationManager):
         approve this user.
 
         The approval email will use the following templates,
-        which can be overriden by setting APPROVAL_EMAIL_SUBJECT,
+        which can be overridden by setting APPROVAL_EMAIL_SUBJECT,
         APPROVAL_EMAIL_BODY, and APPROVAL_EMAIL_HTML appropriately:
 
         ``registration/admin_approve_email_subject.txt``
@@ -601,8 +607,11 @@ class SupervisedRegistrationManager(RegistrationManager):
             'site': site,
         }
         registration_admins = getattr(settings, 'REGISTRATION_ADMINS', None)
-        admins = registration_admins or getattr(settings, 'ADMINS', None)
-
+        if isinstance(registration_admins, str):  # We have a getter
+            admins_getter = import_string(registration_admins)
+            admins = admins_getter()
+        else:
+            admins = registration_admins or getattr(settings, 'ADMINS', None)
         if not registration_admins:
             warnings.warn('No registration admin defined in'
                           ' settings.REGISTRATION_ADMINS.'
@@ -634,7 +643,7 @@ class SupervisedRegistrationProfile(RegistrationProfile):
         ``SupervisedRegistrationProfile``.
 
         The email will use the following templates,
-        which can be overriden by settings APPROVAL_COMPLETE_EMAIL_SUBJECT,
+        which can be overridden by settings APPROVAL_COMPLETE_EMAIL_SUBJECT,
         APPROVAL_COMPLETE_EMAIL_BODY, and APPROVAL_COMPLETE_EMAIL_HTML appropriately:
 
         ``registration/admin_approve_complete_email_subject.txt``
@@ -682,7 +691,7 @@ class SupervisedRegistrationProfile(RegistrationProfile):
             'registration/admin_approve_complete_email.html')
 
         ctx_dict = {
-            'user': self.user.username,
+            'user': self.user,
             'site': site,
         }
         send_email(

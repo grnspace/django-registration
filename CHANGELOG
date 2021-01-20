@@ -2,6 +2,74 @@
 django-registration-redux changelog
 ===================================
 
+Version 2.10, TBD
+----------------
+
+Version 2.9, 1 January, 2021
+----------------
+* BACKWARDS-INCOMPATIBLE CHANGE: Remove support for Django 1.11 and Python
+2.7.
+* Feature: Django 3.1 support.
+`#398 <https://github.com/macropin/django-registration/pull/398>_`
+`#399 <https://github.com/macropin/django-registration/pull/399>_`
+`#400 <https://github.com/macropin/django-registration/pull/400>_`
+`#401 <https://github.com/macropin/django-registration/pull/401>_`
+
+Version 2.8, 7 May, 2020
+----------------
+* Feature: Greek translations -  `#381
+<https://github.com/macropin/django-registration/pull/381>_`
+
+Version 2.7, 4 January, 2020
+----------------
+* Feature: Django 3.0 support - `#373
+<https://github.com/macropin/django-registration/pull/373>_`
+* Feature: Use SHA256 instead of SHA1 for `activation_key` - `#362
+<https://github.com/macropin/django-registration/pull/362>_`
+* Bugfix: Changed path reference from 'login' to 'auth_login'. -
+`#335 <https://github.com/macropin/django-registration/pull/335>_`
+
+Version 2.6, 10 April, 2019
+----------------
+* Bugfix: Pass `user` instance instead of `user.get_username()` to template
+context. -
+`#350 <https://github.com/macropin/django-registration/pull/350>_`
+* Feature: Add testing for Django 2.2 and Python 3.7 (no code changes
+required). - `#352
+<https://github.com/macropin/django-registration/pull/352>_`
+* Bugfix: Send emails on commit `#355
+<https://github.com/macropin/django-registration/pull/355>_`
+
+Version 2.5, 27 October, 2018
+----------------
+* Feature: Add support for Django 2.1. -
+`#337 <https://github.com/macropin/django-registration/pull/337>_`
+* Bugfix: Don't delete if user.is_active=True in cleanupregistration. -
+`#342 <https://github.com/macropin/django-registration/pull/342>_`
+
+Version 2.4, 11 April, 2018
+----------------
+* Bugfix: Updates Spanish translation messages. -
+`#333 <https://github.com/macropin/django-registration/pull/333>_`
+
+Version 2.3, 10 April, 2018
+----------------
+* Bugfix: Updates Spanish translation messages. -
+`#330 <https://github.com/macropin/django-registration/pull/330>_`
+
+Version 2.2, 08 February, 2018
+----------------
+* Bugfix: Updates Russian translation messages. -
+`#321 <https://github.com/macropin/django-registration/pull/321>_`
+
+Version 2.1, 17 December, 2018
+----------------
+* Bugfix: Fix formatting issues in documentation.
+`#319 <https://github.com/macropin/django-registration/pull/319>_`
+* Bugfix: Use ``get_username()`` instead of directly accessing the username to
+support subclasses of ``AbstractBaseUser``
+`#318 <https://github.com/macropin/django-registration/pull/318>_`
+
 Version 2.0, 05 December, 2017
 ----------------
 * BACKWARDS-INCOMPATIBLE CHANGE: Remove support for Django < 1.11.

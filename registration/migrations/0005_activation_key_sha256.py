@@ -5,13 +5,13 @@ from django.db import models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('registration', '0001_initial'),
+        ('registration', '0004_supervisedregistrationprofile'),
     ]
 
     operations = [
-        migrations.AddField(
+        migrations.AlterField(
             model_name='registrationprofile',
-            name='activated',
-            field=models.BooleanField(default=False),
+            name='activation_key',
+            field=models.CharField(max_length=64, verbose_name='activation key'),
         ),
     ]
